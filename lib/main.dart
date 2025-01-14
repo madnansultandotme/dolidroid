@@ -22,12 +22,13 @@ class WebViewScreen extends StatefulWidget {
 
 class _WebViewScreenState extends State<WebViewScreen> {
   final TextEditingController _urlController = TextEditingController();
-  String _currentUrl = 'https://example.com';
-  bool _showInput = true;
   late final WebViewController _webViewController;
 
   // List to store the history of visited links
   List<String> _history = [];
+
+  bool _canGoBack = false;
+  bool _canGoForward = false;
 
   @override
   void initState() {
@@ -37,10 +38,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _initializeWebView() {
-    // Initialize the WebViewController
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..loadRequest(Uri.parse(_currentUrl));
+      ..enableZoom(true);
   }
 
   Future<void> _loadHistory() async {
@@ -58,78 +58,74 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _loadUrl() {
-    setState(() {
-      _currentUrl = _urlController.text.trim();
-      if (_currentUrl.isNotEmpty) {
-        _currentUrl = _currentUrl.startsWith('http')
-            ? _currentUrl
-            : 'https://$_currentUrl';
-        _webViewController.loadRequest(Uri.parse(_currentUrl));
+    String url = _urlController.text.trim();
+    if (url.isNotEmpty) {
+      url = url.startsWith('http') ? url : 'https://$url';
+      _webViewController.loadRequest(Uri.parse(url));
 
-        // Add the current URL to history
-        if (!_history.contains(_currentUrl)) {
-          _history.insert(0, _currentUrl); // Add at the top of the history
+      // Add the URL to history
+      if (!_history.contains(url)) {
+        setState(() {
+          _history.insert(0, url);
           if (_history.length > 5) {
-            _history.removeLast(); // Keep only the top 5 links
+            _history.removeLast();
           }
-          _saveHistory(); // Persist the updated history
-        }
-
-        _showInput = false; // Hide input, button, and AppBar
+        });
+        _saveHistory(); // Persist updated history
       }
-    });
+    }
+  }
+
+  void _updateNavigationState() async {
+    _canGoBack = await _webViewController.canGoBack();
+    _canGoForward = await _webViewController.canGoForward();
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: _showInput
-          ? AppBar(
-              title: Text('DoliDroid'),
-              backgroundColor: Colors.teal,
-            )
-          : null,
-      body: _showInput
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+      appBar: AppBar(
+        title: Text('DoliDroid'),
+        backgroundColor: Colors.teal,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.arrow_back),
+            onPressed: _canGoBack
+                ? () async {
+                    await _webViewController.goBack();
+                    _updateNavigationState();
+                  }
+                : null,
+          ),
+          IconButton(
+            icon: Icon(Icons.arrow_forward),
+            onPressed: _canGoForward
+                ? () async {
+                    await _webViewController.goForward();
+                    _updateNavigationState();
+                  }
+                : null,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              children: [
+                TextField(
+                  controller: _urlController,
+                  decoration: InputDecoration(
+                    hintText: 'Enter URL (e.g., https://example.com)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                SizedBox(height: 8),
+                Row(
                   children: [
-                    TextField(
-                      controller: _urlController,
-                      decoration: InputDecoration(
-                        hintText: 'Enter URL (e.g., https://example.com)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    SizedBox(height: 16),
-                    // Dropdown showing history of links
-                    if (_history.isNotEmpty)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        child: DropdownButton<String>(
-                          isExpanded: true,
-                          hint: Text('Select from history'),
-                          items: _history
-                              .map((link) => DropdownMenuItem<String>(
-                                    value: link,
-                                    child: Text(
-                                      link,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ))
-                              .toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _urlController.text = value!;
-                            });
-                          },
-                        ),
-                      ),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 60,
+                    Expanded(
                       child: ElevatedButton(
                         onPressed: _loadUrl,
                         style: ElevatedButton.styleFrom(
@@ -144,9 +140,41 @@ class _WebViewScreenState extends State<WebViewScreen> {
                     ),
                   ],
                 ),
-              ),
-            )
-          : WebViewWidget(controller: _webViewController),
+                SizedBox(height: 8),
+                if (_history.isNotEmpty)
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    hint: Text('Select from history'),
+                    items: _history
+                        .map((link) => DropdownMenuItem<String>(
+                              value: link,
+                              child: Text(
+                                link,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _urlController.text = value!;
+                      });
+                    },
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: WebViewWidget(
+              controller: _webViewController
+                ..setNavigationDelegate(
+                  NavigationDelegate(
+                    onPageFinished: (url) => _updateNavigationState(),
+                  ),
+                ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
